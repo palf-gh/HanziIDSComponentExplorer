@@ -115,16 +115,34 @@ def _normalize_cjk_variant(char: str) -> str:
 class HanziCore:
     """漢字部件分析核心引擎"""
 
-    def __init__(self, data_path: str):
+    def __init__(
+        self,
+        data_path: Optional[str] = None,
+        database: Optional[Dict[str, Dict[str, object]]] = None,
+        source_name: Optional[str] = None,
+    ):
         """
         初始化引擎並載入資料庫
 
         參數:
-        data_path (str): IDS 資料庫檔案路徑（.pdata 格式）
+        data_path (Optional[str]): IDS 資料庫檔案路徑（.pdata 格式）
+        database (Optional[Dict]): 已載入的 pdata 相容資料庫。
+            指定時は data_path より優先し、外部 IDS provider を利用できる。
+        source_name (Optional[str]): UI/診断用の資料源名称。
         """
-        self.data_path = self._resolve_path(data_path)
+        self.data_path = self._resolve_path(data_path) if data_path else None
+        self.source_name = source_name or ("CHISE IDS" if data_path else "External IDS")
         self._parsed_ids_cache: Dict[str, List[List[str]]] = {}
-        self.db = self._load_database()
+
+        if database is not None:
+            if not isinstance(database, dict):
+                raise ValueError("database must be a dict")
+            self.db = self._convert_format(database)
+        elif self.data_path is not None:
+            self.db = self._load_database()
+        else:
+            raise ValueError("Either data_path or database must be provided")
+
         self._build_indexes()
 
     def _resolve_path(self, path: str) -> Path:
