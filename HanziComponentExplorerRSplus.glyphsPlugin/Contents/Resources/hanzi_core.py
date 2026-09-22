@@ -26,10 +26,11 @@ ERROR_UNKNOWN_CHAR = "未知字符"
 ERROR_SEARCH_FAILED = "搜尋失敗"
 
 # IDS 分隔字符 (Ideographic Description Characters)
-IDC_CHARS = "⿰⿱⿲⿳⿴⿵⿶⿷⿸⿹⿺⿻〾"
+# Unicode 15.1+ の追加 IDC（⿼⿽⿾⿿㇯）にも対応。
+IDC_CHARS = "⿰⿱⿲⿳⿴⿵⿶⿷⿸⿹⿺⿻⿼⿽⿾⿿㇯〾"
 
 # 每個 IDC 帶的 operand 個數（IDS 標準）：
-# 二元：⿰⿱⿴⿵⿶⿷⿸⿹⿺⿻；三元：⿲⿳；一元：〾（變體）
+# 二元：⿰⿱⿴〜⿽、㇯；三元：⿲⿳；一元：⿾⿿、〾（既有資料互換）
 IDC_ARITY = {
     "⿰": 2,
     "⿱": 2,
@@ -43,11 +44,16 @@ IDC_ARITY = {
     "⿹": 2,
     "⿺": 2,
     "⿻": 2,
+    "⿼": 2,
+    "⿽": 2,
+    "⿾": 1,
+    "⿿": 1,
+    "㇯": 2,
     "〾": 1,
 }
 
 # 位置分組標籤的展示順序（IDC 主序、位置升序、≡ 在最後、direct before nested）
-IDC_ORDER = "⿰⿱⿲⿳⿴⿵⿶⿷⿸⿹⿺⿻〾∅"
+IDC_ORDER = "⿰⿱⿲⿳⿴⿵⿶⿷⿸⿹⿺⿻⿼⿽⿾⿿㇯〾∅"
 MULTI_POSITION_MARKER = "≡"
 NESTED_POSITION_MARKER = "·"
 UNCLASSIFIED_LABEL = "∅"
@@ -406,7 +412,7 @@ class HanziCore:
         """
 
         def split_special_chars(s):
-            return re.findall(r"&[^;]+;|[⿰⿱⿲⿳⿴⿵⿶⿷⿸⿹⿺⿻〾]|\S", s)
+            return re.findall(r"&[^;]+;|[⿰⿱⿲⿳⿴⿵⿶⿷⿸⿹⿺⿻⿼⿽⿾⿿㇯〾]|\S", s)
 
         if isinstance(ids, str):
             if ids in self._parsed_ids_cache:
