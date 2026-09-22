@@ -1529,7 +1529,10 @@ class HanziComponentSearchTool:
         try:
             from yibai_ids import load as load_yibai_ids, source_label
 
-            database = load_yibai_ids(level=level)
+            database = load_yibai_ids(
+                level=level,
+                stroke_data_path=self._find_data_path(),
+            )
             self.active_ids_source = source
             return HanziCore(
                 database=database,
