@@ -323,7 +323,7 @@ class HanziComponentSearchTool:
 
     def __init__(self, title=None):
         # === 初始化核心引擎 ===
-        self.core = HanziCore(self._find_data_path())
+        self.core = self._load_preferred_core()
 
         # === 初始化 Glyphs 適配器 ===
         self.adapter = GlyphsAdapter()
@@ -1491,9 +1491,33 @@ class HanziComponentSearchTool:
             self._refresh_summary_panel(hint=L("summary_open_new_tab_failed"))
 
     def _find_data_path(self) -> str:
-        """尋找資料庫路徑"""
+        """尋找既有 CHISE 資料庫路徑。"""
         script_dir = os.path.dirname(os.path.abspath(__file__))
         return os.path.join(script_dir, "data", "ids.pdata")
+
+    def _load_preferred_core(self):
+        """
+        優先使用 Yi Bai IDS lv1；網路或快取不可用時回退既有 CHISE 資料。
+
+        Yi Bai lv1 合併了部分筆畫層級差異，較適合 Glyphs 中的部件探索。
+        下載結果會快取到使用者的 ~/Library/Caches，預設七天更新一次。
+        """
+        try:
+            from yibai_ids import load as load_yibai_ids, source_label
+
+            database = load_yibai_ids(level=1)
+            return HanziCore(
+                database=database,
+                source_name=source_label(level=1),
+            )
+        except Exception as exc:
+            # 外部資料源不能阻止外掛啟動。Glyphs Macro Panel 可看到原因。
+            print("[Hanzi Component Explorer RS+] Yi Bai IDS unavailable; "
+                  "falling back to bundled CHISE IDS: %s" % exc)
+            return HanziCore(
+                self._find_data_path(),
+                source_name="CHISE IDS (bundled fallback)",
+            )
 
     # === UI utilities ===
 
