@@ -766,6 +766,49 @@ STRINGS = {
         "zh-Hans": "已选 {selected} · 总数 {total} · ★{favorite} · 中性 ● 已完成 / ○ 已存在 / – 未建立",
         "ja": "選択 {selected} · 総数 {total} · ★{favorite} · 中性色 ●制作済み / ○グリフあり / –未作成",
     },
+    # IDS data source
+    "menu_ids_source": {
+        "en": "IDS Data",
+        "zh-Hant": "IDS 資料",
+        "zh-Hans": "IDS 数据",
+        "ja": "IDSデータ",
+    },
+    "ids_source_yibai_lv0": {
+        "en": "Yi Bai lv0 (strict glyph form)",
+        "zh-Hant": "白易 lv0（嚴格字形）",
+        "zh-Hans": "白易 lv0（严格字形）",
+        "ja": "白易 lv0（字形を厳密に区別）",
+    },
+    "ids_source_yibai_lv1": {
+        "en": "Yi Bai lv1 (merge stroke variants)",
+        "zh-Hant": "白易 lv1（合併筆畫差異）",
+        "zh-Hans": "白易 lv1（合并笔画差异）",
+        "ja": "白易 lv1（筆画差を統合）",
+    },
+    "ids_source_yibai_lv2": {
+        "en": "Yi Bai lv2 (merge UCV variants)",
+        "zh-Hant": "白易 lv2（合併 UCV 差異）",
+        "zh-Hans": "白易 lv2（合并 UCV 差异）",
+        "ja": "白易 lv2（UCV差も統合）",
+    },
+    "ids_source_chise": {
+        "en": "CHISE (bundled)",
+        "zh-Hant": "CHISE（內建）",
+        "zh-Hans": "CHISE（内置）",
+        "ja": "CHISE（同梱）",
+    },
+    "summary_ids_source_changed": {
+        "en": "IDS data source: {source}",
+        "zh-Hant": "IDS 資料源：{source}",
+        "zh-Hans": "IDS 数据源：{source}",
+        "ja": "IDSデータを {source} に切り替えました。",
+    },
+    "summary_ids_source_fallback": {
+        "en": "{source} could not be loaded; using bundled CHISE IDS.",
+        "zh-Hant": "無法載入 {source}，已改用內建 CHISE IDS。",
+        "zh-Hans": "无法载入 {source}，已改用内置 CHISE IDS。",
+        "ja": "{source} を読み込めなかったため、同梱CHISE IDSを使用しています。",
+    },
 }
 
 
