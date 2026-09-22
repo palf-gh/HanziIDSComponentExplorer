@@ -14,6 +14,8 @@ from __future__ import division, print_function, unicode_literals
 import os
 import re
 import time
+import gzip
+import pickle
 from pathlib import Path
 
 try:
@@ -42,6 +44,10 @@ def cache_dir():
 
 def cache_path(level=1):
     return cache_dir() / ("yi-bai-ids-lv%d.txt" % int(level))
+
+
+def compiled_cache_path(level=1):
+    return cache_dir() / ("yi-bai-ids-lv%d.pdata" % int(level))
 
 
 def _is_cache_fresh(path, max_age=CACHE_MAX_AGE):
@@ -161,10 +167,81 @@ def parse_text(text):
     return db
 
 
-def load(level=1, force_refresh=False):
-    path = download(level=level, force=force_refresh)
-    with open(str(path), "r", encoding="utf-8") as f:
-        return parse_text(f.read())
+def _merge_strokes(database, stroke_data_path):
+    """Copy stroke counts from the bundled CHISE-derived pdata when available."""
+    if not stroke_data_path:
+        return database
+
+    try:
+        with gzip.open(str(stroke_data_path), "rb") as f:
+            source = pickle.load(f)
+    except Exception:
+        return database
+
+    if not isinstance(source, dict):
+        return database
+
+    for char, item in database.items():
+        source_item = source.get(char)
+        if isinstance(source_item, dict):
+            item["strokes"] = source_item.get("strokes")
+    return database
+
+
+def _compiled_cache_is_current(compiled, raw, stroke_data_path=None):
+    try:
+        if not compiled.exists():
+            return False
+        compiled_mtime = compiled.stat().st_mtime
+        newest_source = raw.stat().st_mtime
+        if stroke_data_path:
+            stroke_path = Path(stroke_data_path)
+            if stroke_path.exists():
+                newest_source = max(newest_source, stroke_path.stat().st_mtime)
+        return compiled_mtime >= newest_source
+    except OSError:
+        return False
+
+
+def load(level=1, force_refresh=False, stroke_data_path=None):
+    """
+    Load Yi Bai IDS as HanziCore-compatible data.
+
+    The raw upstream text is cached for seven days. A converted gzip+pickle
+    cache is kept separately so subsequent plugin launches do not need to
+    parse roughly 100k IDS records again. Stroke counts are borrowed from the
+    bundled CHISE-derived database because Yi Bai IDS itself does not provide
+    stroke metadata.
+    """
+    raw = download(level=level, force=force_refresh)
+    compiled = compiled_cache_path(level)
+
+    if not force_refresh and _compiled_cache_is_current(
+        compiled, raw, stroke_data_path
+    ):
+        try:
+            with gzip.open(str(compiled), "rb") as f:
+                cached = pickle.load(f)
+            if isinstance(cached, dict):
+                return cached
+        except Exception:
+            pass
+
+    with open(str(raw), "r", encoding="utf-8") as f:
+        database = parse_text(f.read())
+
+    _merge_strokes(database, stroke_data_path)
+
+    try:
+        tmp = compiled.with_suffix(".tmp")
+        with gzip.open(str(tmp), "wb") as f:
+            pickle.dump(database, f, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(str(tmp), str(compiled))
+    except Exception:
+        # Cache failure must not prevent the plugin from working.
+        pass
+
+    return database
 
 
 def source_label(level=1):
