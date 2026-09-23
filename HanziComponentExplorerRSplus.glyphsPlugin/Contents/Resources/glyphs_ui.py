@@ -763,6 +763,7 @@ class HanziComponentSearchTool:
         self.update_color_display()
 
         self.w.open()
+        self._refresh_results_split_interaction(initial_layout=True)
         # 在視窗開啟後更新相關顯示
         self.update_related_display()
         # 設定右側相關字區域的選取監聽 / ダブルクリック動作
@@ -920,6 +921,20 @@ class HanziComponentSearchTool:
             height = self._layout_related_tile_items(width)
             self.relatedTileView.setFrameSize_(NSMakeSize(width, height))
             self.relatedTileView.setNeedsDisplay_(True)
+        except Exception:
+            pass
+
+    def _refresh_results_split_interaction(self, initial_layout=False):
+        """Make the divider's resize cursor available on its first display."""
+        try:
+            split_view = self.w.resultsSplit.getNSSplitView()
+            if initial_layout:
+                split_view.adjustSubviews()
+            split_view.setNeedsDisplay_(True)
+            window = split_view.window()
+            if window is not None:
+                window.invalidateCursorRectsForView_(split_view)
+            split_view.resetCursorRects()
         except Exception:
             pass
 
@@ -3883,9 +3898,11 @@ class HanziComponentSearchTool:
 
     def on_window_resized(self, notification=None):
         self._relayout_related_tiles_to_scroll_width()
+        self._refresh_results_split_interaction()
 
     def on_results_split_resized(self, notification=None):
         self._relayout_related_tiles_to_scroll_width()
+        self._refresh_results_split_interaction()
 
     def setup_selection_observer(self):
         """監聽右側相關字區域的選取變化，控制插入按鈕啟用狀態"""
