@@ -61,3 +61,11 @@ Source: https://data.gov.tw/dataset/5961
 The stroke count data used by the stroke filter feature is derived from
 `Tables/Properties/CNS_stroke.txt` in the CNS11643-OpenData repository
 (https://github.com/yintzuyuan/CNS11643-OpenData).
+
+
+Yi Bai IDS data
+---------------
+Yi Bai's IDS dataset (https://github.com/yi-bai/ids) is bundled under
+HanziComponentExplorerRSplus.glyphsPlugin/Contents/Resources/data/yi-bai/.
+The dataset is distributed under the MIT License; see the bundled
+data/yi-bai/LICENSE file.
