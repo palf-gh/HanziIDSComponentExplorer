@@ -14,9 +14,11 @@ from __future__ import division, print_function, unicode_literals
 import os
 import re
 import time
+from bisect import bisect_right
 from typing import Optional, Set, List
 
 import vanilla
+from vanilla.vanillaSplitView import VanillaSplitViewDelegate
 from AppKit import (
     NSFont,
     NSAttributedString,
@@ -334,6 +336,22 @@ ResizeObserverHandler = type(
     {
         "initWithTool_": lambda self, tool: setattr(self, "tool", tool) or self,
         "windowDidResize_": lambda self, notification: self.tool.on_window_resized(notification),
+        "splitViewDidResizeSubviews_": lambda self, notification: self.tool.on_results_split_resized(notification),
+    },
+)
+
+
+# vanilla hides split-view dividers by default. This also hides the native
+# resize affordance, even when the panes themselves can be resized.
+visible_divider_delegate_class_name = f"VisibleDividerSplitViewDelegate_{int(time.time() * 1000)}"
+
+VisibleDividerSplitViewDelegate = type(
+    visible_divider_delegate_class_name,
+    (VanillaSplitViewDelegate,),
+    {
+        "splitView_shouldHideDividerAtIndex_": (
+            lambda self, splitView, dividerIndex: False
+        ),
     },
 )
 
@@ -381,6 +399,8 @@ class HanziComponentSearchTool:
         self.tile_color_labels_enabled = bool(self.settings.get("tileColorLabelsEnabled", False))
         self.show_designed_only = bool(self.settings.get("showDesignedOnly", False))
         self.related_tile_items = []
+        self.related_tile_rows = []
+        self.related_tile_row_bottoms = []
         self.related_tile_selection = set()
         self.related_tile_anchor_index = None
         self.related_tile_layout_width = 0
@@ -529,24 +549,6 @@ class HanziComponentSearchTool:
         if not 0 <= self.stroke_filter_tick < STROKE_FILTER_TICK_COUNT:
             self.stroke_filter_tick = STROKE_FILTER_OFF_TICK
 
-        # IDS 切換控制區（列表上方獨立一行，初始隱藏）
-        self.w.idsSwitcher = vanilla.Group((154, 108, 170, 20))
-
-        self.w.idsSwitcher.prevButton = vanilla.Button(
-            (0, 0, 35, 20), "◀", callback=self.prev_ids, sizeStyle="small"
-        )
-
-        self.w.idsSwitcher.indicator = vanilla.TextBox(
-            (40, 0, 70, 20), "1/2", alignment="center", sizeStyle="small"
-        )
-
-        self.w.idsSwitcher.nextButton = vanilla.Button(
-            (115, 0, 35, 20), "▶", callback=self.next_ids, sizeStyle="small"
-        )
-
-        # 初始隱藏
-        self.w.idsSwitcher.show(False)
-
         # === 左側資訊區 ===
         # 預覽區
         self.w.preview = vanilla.TextBox((12, 114, 126, 126), "", alignment="center")
@@ -561,9 +563,23 @@ class HanziComponentSearchTool:
         # 詳細資訊區（向下擴展到視窗底部）
         self.w.content = vanilla.TextEditor((12, 292, 126, -50), "", readOnly=True)
 
-        # === 中間結果列表 ===
-        self.w.resultList = vanilla.List(
-            (154, 132, 250, -50), [], selectionCallback=self.selection_callback
+        # === 可変のツリー／関連字ペイン ===
+        # 深いIDSツリーは固定幅では読みにくいため、ネイティブの分割バーで
+        # ツリーと関連字の幅を自由に調整できるようにする。
+        self.treePane = vanilla.Group((0, 0, -0, -0))
+        self.treePane.idsSwitcher = vanilla.Group((4, 0, -4, 20))
+        self.treePane.idsSwitcher.prevButton = vanilla.Button(
+            (0, 0, 35, 20), "◀", callback=self.prev_ids, sizeStyle="small"
+        )
+        self.treePane.idsSwitcher.indicator = vanilla.TextBox(
+            (40, 0, -40, 20), "1/2", alignment="center", sizeStyle="small"
+        )
+        self.treePane.idsSwitcher.nextButton = vanilla.Button(
+            (-35, 0, 35, 20), "▶", callback=self.next_ids, sizeStyle="small"
+        )
+        self.treePane.idsSwitcher.show(False)
+        self.treePane.resultList = vanilla.List(
+            (4, 24, -4, -0), [], selectionCallback=self.selection_callback
         )
 
         # 樹形図の枝線を揃えるため、可能なら等幅システムフォントを使う。
@@ -571,7 +587,7 @@ class HanziComponentSearchTool:
             result_list_font = NSFont.monospacedSystemFontOfSize_weight_(RESULT_LIST_FONT_SIZE, 0.0)
         except Exception:
             result_list_font = self.get_font_for_char("漢", RESULT_LIST_FONT_SIZE)
-        tableView = self.w.resultList.getNSTableView()
+        tableView = self.treePane.resultList.getNSTableView()
         for column in tableView.tableColumns():
             column.dataCell().setFont_(result_list_font)
 
@@ -585,8 +601,40 @@ class HanziComponentSearchTool:
 
         # === 右側関連字エリア ===
         # 旧TextEditorはテキストモード/フォールバック用に保持。
-        self.w.relatedChars = vanilla.TextEditor((420, 112, -12, -50), "", readOnly=True)
-        self.w.relatedTileHost = vanilla.Group((420, 112, -12, -50))
+        self.relatedPane = vanilla.Group((0, 0, -0, -0))
+        self.relatedPane.relatedChars = vanilla.TextEditor((4, 4, -4, -4), "", readOnly=True)
+        self.relatedPane.relatedTileHost = vanilla.Group((4, 4, -4, -4))
+
+        self.w.resultsSplit = vanilla.SplitView(
+            (150, 108, -8, -46),
+            [
+                dict(
+                    view=self.treePane,
+                    identifier="idsTree",
+                    size=258,
+                    minSize=190,
+                    canCollapse=False,
+                    resizeFlexibility=False,
+                ),
+                dict(
+                    view=self.relatedPane,
+                    identifier="relatedCharacters",
+                    minSize=280,
+                    canCollapse=False,
+                    resizeFlexibility=True,
+                ),
+            ],
+            isVertical=True,
+            # A standard splitter gives the divider a clear visual grip and a
+            # comfortably wide hit target, including macOS's resize cursor.
+            dividerStyle="splitter",
+            dividerThickness=8,
+            autosaveName="com.HanziComponentExplorerRSplus.ResultsSplit",
+        )
+        # vanilla's default delegate hides every divider. Keeping this divider
+        # visible restores AppKit's built-in splitter grip and hover cursor.
+        self.w.resultsSplit._delegate = VisibleDividerSplitViewDelegate.alloc().init()
+        self.w.resultsSplit.getNSSplitView().setDelegate_(self.w.resultsSplit._delegate)
         self._install_related_tile_engine()
         self._sync_related_display_mode()
 
@@ -735,6 +783,7 @@ class HanziComponentSearchTool:
         self.update_color_display()
 
         self.w.open()
+        self._refresh_results_split_interaction(initial_layout=True)
         # 在視窗開啟後更新相關顯示
         self.update_related_display()
         # 設定右側相關字區域的選取監聽 / ダブルクリック動作
@@ -794,8 +843,6 @@ class HanziComponentSearchTool:
             ("summaryCard", (8, 40, -8, 66), 12.0),
             ("previewCard", (8, 108, 134, 170), 14.0),
             ("contentCard", (8, 288, 134, -46), 10.0),
-            ("resultCard", (150, 128, 258, -46), 10.0),
-            ("relatedCard", (416, 108, -8, -46), 12.0),
         ]
         for attr, rect, radius in specs:
             try:
@@ -826,7 +873,7 @@ class HanziComponentSearchTool:
         old TextEditor remains available as a safe fallback and for non-tile mode.
         """
         try:
-            host_view = self.w.relatedTileHost.getNSView()
+            host_view = self.relatedPane.relatedTileHost.getNSView()
             scroll = NSScrollView.alloc().initWithFrame_(host_view.bounds())
             scroll.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
             scroll.setHasVerticalScroller_(True)
@@ -862,11 +909,11 @@ class HanziComponentSearchTool:
         """Show object tiles when possible; otherwise fall back to text."""
         use_object_tiles = bool(self.tile_view_enabled and self._tile_engine_available())
         try:
-            self.w.relatedTileHost.show(use_object_tiles)
+            self.relatedPane.relatedTileHost.show(use_object_tiles)
         except Exception:
             pass
         try:
-            self.w.relatedChars.show(not use_object_tiles)
+            self.relatedPane.relatedChars.show(not use_object_tiles)
         except Exception:
             pass
         return use_object_tiles
@@ -894,6 +941,19 @@ class HanziComponentSearchTool:
             height = self._layout_related_tile_items(width)
             self.relatedTileView.setFrameSize_(NSMakeSize(width, height))
             self.relatedTileView.setNeedsDisplay_(True)
+        except Exception:
+            pass
+
+    def _refresh_results_split_interaction(self, initial_layout=False):
+        """Refresh the native splitter after its panes have been laid out."""
+        try:
+            split_view = self.w.resultsSplit.getNSSplitView()
+            if initial_layout:
+                split_view.adjustSubviews()
+            split_view.setNeedsDisplay_(True)
+            window = split_view.window()
+            if window is not None:
+                window.invalidateCursorRectsForView_(split_view)
         except Exception:
             pass
 
@@ -1054,6 +1114,8 @@ class HanziComponentSearchTool:
     def _layout_related_tile_items(self, width=None):
         if not self.related_tile_items:
             self.related_tile_content_height = 1
+            self.related_tile_rows = []
+            self.related_tile_row_bottoms = []
             return 1
         cfg = self._tile_geometry_config()
         pad, gap = cfg["pad"], cfg["gap"]
@@ -1091,7 +1153,38 @@ class HanziComponentSearchTool:
         y += pad
         self.related_tile_content_height = max(1, int(y))
         self.related_tile_layout_width = width
+        self._rebuild_related_tile_row_index()
         return self.related_tile_content_height
+
+    def _rebuild_related_tile_row_index(self):
+        """Index tile rows so scrolling does not scan every result item."""
+        rows = []
+        for index, item in enumerate(self.related_tile_items):
+            x, y, width, height = item.get("rect", (0, 0, 0, 0))
+            if rows and abs(rows[-1]["y"] - y) < 0.5:
+                row = rows[-1]
+            else:
+                row = {"y": y, "bottom": y + height, "indexes": []}
+                rows.append(row)
+            row["bottom"] = max(row["bottom"], y + height)
+            row["indexes"].append(index)
+        self.related_tile_rows = rows
+        self.related_tile_row_bottoms = [row["bottom"] for row in rows]
+
+    def _tile_indexes_in_dirty_rect(self, dirty_rect):
+        """Return only the rows AppKit has asked the tile view to repaint."""
+        try:
+            minimum_y = float(dirty_rect.origin.y)
+            maximum_y = minimum_y + float(dirty_rect.size.height)
+        except Exception:
+            return range(len(self.related_tile_items))
+        start = bisect_right(self.related_tile_row_bottoms, minimum_y)
+        visible_indexes = []
+        for row in self.related_tile_rows[start:]:
+            if row["y"] >= maximum_y:
+                break
+            visible_indexes.extend(row["indexes"])
+        return visible_indexes
 
     def _render_related_tiles_from_display_text(self, text):
         """Render current related output into the object-tile engine."""
@@ -1116,7 +1209,7 @@ class HanziComponentSearchTool:
             rendered_text,
             self._tile_density_config()["font_size"] if self.tile_view_enabled else RELATED_CHARS_FONT_SIZE,
         )
-        text_view = self.w.relatedChars.getNSTextView()
+        text_view = self.relatedPane.relatedChars.getNSTextView()
         text_view.textStorage().setAttributedString_(attr_string)
 
     def _set_related_output(self, display_text, focus_char=None, result_count=None, hint=None):
@@ -1385,7 +1478,8 @@ class HanziComponentSearchTool:
         selected_stroke = self._with_alpha(colors["accent"], 0.72)
         current_stroke = self._with_alpha(colors["accent"], 0.55)
 
-        for idx, item in enumerate(self.related_tile_items):
+        for idx in self._tile_indexes_in_dirty_rect(dirty_rect):
+            item = self.related_tile_items[idx]
             if not self._tile_item_intersects_dirty_rect(item, dirty_rect):
                 continue
             kind = item.get("kind")
@@ -1630,7 +1724,7 @@ class HanziComponentSearchTool:
         if self.tile_view_enabled and self._tile_engine_available():
             return self._selected_tile_chars()
         try:
-            text_view = self.w.relatedChars.getNSTextView()
+            text_view = self.relatedPane.relatedChars.getNSTextView()
             selected_range = text_view.selectedRange()
             if selected_range.length == 0:
                 return ""
@@ -2051,7 +2145,7 @@ class HanziComponentSearchTool:
     def _character_at_related_text_click(self, gesture):
         """ダブルクリック位置から近傍の有効文字を1字拾うフォールバック。"""
         try:
-            text_view = self.w.relatedChars.getNSTextView()
+            text_view = self.relatedPane.relatedChars.getNSTextView()
             point = gesture.locationInView_(text_view)
             if hasattr(text_view, "characterIndexForInsertionAtPoint_"):
                 index = text_view.characterIndexForInsertionAtPoint_(point)
@@ -2251,7 +2345,7 @@ class HanziComponentSearchTool:
             self.display_results = [self._format_result_row(original)] + [self._format_result_row(p) for p in self.multi_component_parts]
         elif self.all_results:
             self.display_results = [self._format_result_row(item) for item in self.all_results]
-        self.w.resultList.set(self.display_results)
+        self.treePane.resultList.set(self.display_results)
         self._adjust_result_list_column_width()
 
     # === 統一篩選選單 ===
@@ -2469,7 +2563,7 @@ class HanziComponentSearchTool:
 
     def _adjust_result_list_column_width(self):
         """根據內容動態調整結果列表欄位寬度"""
-        tableView = self.w.resultList.getNSTableView()
+        tableView = self.treePane.resultList.getNSTableView()
         if not self.display_results:
             return
 
@@ -2755,7 +2849,7 @@ class HanziComponentSearchTool:
         """
         # 生成顯示結果並同時存儲
         self.display_results = [self._format_result_row(item) for item in self.all_results]
-        self.w.resultList.set(self.display_results)
+        self.treePane.resultList.set(self.display_results)
         self._adjust_result_list_column_width()
         self.last_result_count = len(self.display_results)
 
@@ -2793,7 +2887,7 @@ class HanziComponentSearchTool:
         original = "".join(parts)
         self._add_recent_query(original)
         self.display_results = [self._format_result_row(original)] + [self._format_result_row(p) for p in parts]
-        self.w.resultList.set(self.display_results)
+        self.treePane.resultList.set(self.display_results)
         self._adjust_result_list_column_width()
         self.last_result_count = len(self.display_results)
 
@@ -2851,7 +2945,7 @@ class HanziComponentSearchTool:
         if hasattr(self.w, "previewMeta"):
             self.w.previewMeta.set("")
         self.w.content.set("")
-        self.w.idsSwitcher.show(False)
+        self.treePane.idsSwitcher.show(False)
         if hasattr(self.w, "cnsLinkButton"):
             self.w.cnsLinkButton.enable(False)
 
@@ -2968,7 +3062,7 @@ class HanziComponentSearchTool:
             text_view.textStorage().setAttributedString_(attr_string)
 
             # 更新指示器
-            self.w.idsSwitcher.indicator.set(
+            self.treePane.idsSwitcher.indicator.set(
                 f"{self.current_ids_index + 1}/{len(self.available_ids)}"
             )
 
@@ -2980,7 +3074,7 @@ class HanziComponentSearchTool:
 
             # 更新結果列表顯示
             self.display_results = [self._format_result_row(item) for item in self.all_results]
-            self.w.resultList.set(self.display_results)
+            self.treePane.resultList.set(self.display_results)
             self._adjust_result_list_column_width()
 
             # 更新相關字顯示（基於當前選中的 IDS）
@@ -3061,12 +3155,12 @@ class HanziComponentSearchTool:
 
             # 控制切換器顯示
             if len(self.available_ids) > 1:
-                self.w.idsSwitcher.show(True)
-                self.w.idsSwitcher.indicator.set(
+                self.treePane.idsSwitcher.show(True)
+                self.treePane.idsSwitcher.indicator.set(
                     f"{self.current_ids_index + 1}/{len(self.available_ids)}"
                 )
             else:
-                self.w.idsSwitcher.show(False)
+                self.treePane.idsSwitcher.show(False)
 
         # 更新相關顯示
         self.update_related_display()
@@ -3799,7 +3893,7 @@ class HanziComponentSearchTool:
     # === 插入按鈕功能 ===
 
     def setup_window_resize_observer(self):
-        """ウィンドウ幅変更時にタイルを再折り返しする。"""
+        """ウィンドウ／分割バー変更時にタイルを再折り返しする。"""
         try:
             window = self.w.getNSWindow()
             NSNotificationCenter.defaultCenter().addObserver_selector_name_object_(
@@ -3810,13 +3904,28 @@ class HanziComponentSearchTool:
             )
         except Exception:
             pass
+        try:
+            split_view = self.w.resultsSplit.getNSSplitView()
+            NSNotificationCenter.defaultCenter().addObserver_selector_name_object_(
+                self.resizeObserver,
+                "splitViewDidResizeSubviews:",
+                "NSSplitViewDidResizeSubviewsNotification",
+                split_view,
+            )
+        except Exception:
+            pass
 
     def on_window_resized(self, notification=None):
         self._relayout_related_tiles_to_scroll_width()
+        self._refresh_results_split_interaction()
+
+    def on_results_split_resized(self, notification=None):
+        self._relayout_related_tiles_to_scroll_width()
+        self._refresh_results_split_interaction()
 
     def setup_selection_observer(self):
         """監聽右側相關字區域的選取變化，控制插入按鈕啟用狀態"""
-        textView = self.w.relatedChars.getNSTextView()
+        textView = self.relatedPane.relatedChars.getNSTextView()
         NSNotificationCenter.defaultCenter().addObserver_selector_name_object_(
             self.selectionObserver,
             "textViewSelectionDidChange:",
@@ -3827,7 +3936,7 @@ class HanziComponentSearchTool:
     def setup_related_double_click_handler(self):
         """右ペインのタイル/文字をダブルクリックで新規タブ展開できるようにする。"""
         try:
-            textView = self.w.relatedChars.getNSTextView()
+            textView = self.relatedPane.relatedChars.getNSTextView()
             recognizer = NSClickGestureRecognizer.alloc().initWithTarget_action_(
                 self.relatedDoubleClickHandler, "handleRelatedDoubleClick:"
             )
@@ -3848,7 +3957,7 @@ class HanziComponentSearchTool:
 
     def on_selection_changed(self, notification):
         """當選取變化時更新插入按鈕狀態"""
-        textView = self.w.relatedChars.getNSTextView()
+        textView = self.relatedPane.relatedChars.getNSTextView()
         has_selection = textView.selectedRange().length > 0
         self.w.insertButton.enable(has_selection)
         if hasattr(self.w, "searchSelectedButton"):
@@ -3871,7 +3980,7 @@ class HanziComponentSearchTool:
         if self.tile_view_enabled and self._tile_engine_available():
             selectedText = self._selected_tile_chars()
         else:
-            textView = self.w.relatedChars.getNSTextView()
+            textView = self.relatedPane.relatedChars.getNSTextView()
             selectedRange = textView.selectedRange()
             if selectedRange.length == 0:
                 return
