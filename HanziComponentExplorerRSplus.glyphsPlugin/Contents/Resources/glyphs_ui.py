@@ -80,6 +80,21 @@ STROKE_FILTER_TICK_COUNT = STROKE_FILTER_OFF_TICK + 1  # 6 個 tick 位置
 IDS_SOURCE_OPTIONS = ("yibai_lv0", "yibai_lv1", "yibai_lv2", "chise")
 DEFAULT_IDS_SOURCE = "yibai_lv0"
 
+# Bai IDS uses trailing indicators to identify source-specific glyph forms.
+# Codes outside this table remain visible as raw glyph-form annotations.
+VARIANT_REGION_LABEL_KEYS = {
+    ".": "ids_variant_source_default",
+    "G": "ids_variant_source_g",
+    "H": "ids_variant_source_h",
+    "J": "ids_variant_source_j",
+    "K": "ids_variant_source_k",
+    "KP": "ids_variant_source_kp",
+    "M": "ids_variant_source_m",
+    "T": "ids_variant_source_t",
+    "U": "ids_variant_source_u",
+    "V": "ids_variant_source_v",
+}
+
 # 右側相關字區域排版設定
 RELATED_CHARS_KERN = 0.0  # 字距（字符間距，單位：點）- 預設值
 RELATED_CHARS_LINE_HEIGHT = 1.2  # 行高倍數（相對於字體大小）
@@ -2880,6 +2895,46 @@ class HanziComponentSearchTool:
             )
             self.refresh_ids_display()
 
+    def _selected_ids_variant(self):
+        if not self.available_ids:
+            return None
+        if not 0 <= self.current_ids_index < len(self.available_ids):
+            self.current_ids_index = 0
+        return self.available_ids[self.current_ids_index]
+
+    def _ids_variant_note(self, variant):
+        """Format Bai IDS regional indicators for the current UI language."""
+        indicators = [str(value) for value in variant.get("indicators", []) if value]
+        raw_indicators = ", ".join(indicators)
+        sources = []
+        for indicator in indicators:
+            for code in indicator.split(","):
+                label_key = VARIANT_REGION_LABEL_KEYS.get(code.strip())
+                if label_key:
+                    label = L(label_key)
+                    if label not in sources:
+                        sources.append(label)
+
+        notes = []
+        if sources:
+            notes.append(
+                L("ids_variant_regional_form").format(
+                    sources=" · ".join(sources), indicators=raw_indicators
+                )
+            )
+        elif raw_indicators:
+            notes.append(L("ids_variant_shape_note").format(indicators=raw_indicators))
+        if variant.get("group") == "alternative":
+            notes.append(L("ids_variant_alternative"))
+        return " · ".join(notes)
+
+    def _format_ids_variant(self, variant):
+        if not variant:
+            return ""
+        ids = str(variant.get("ids", ""))
+        note = self._ids_variant_note(variant)
+        return f"{ids}\n{note}" if note else ids
+
     def next_ids(self, sender):
         """切換到下一個 IDS"""
         if len(self.available_ids) > 1:
@@ -2896,18 +2951,7 @@ class HanziComponentSearchTool:
         data = self.core.get_data(self.current_char)
         if data:
             char_data = data[self.current_char]
-
-            # 顯示所有可用的 IDS 拆法，並標示當前選中的
-            if len(self.available_ids) == 1:
-                ids_display = self.available_ids[0]
-            else:
-                ids_lines = []
-                for i, ids in enumerate(self.available_ids):
-                    if i == self.current_ids_index:
-                        ids_lines.append(f"▶ {ids}")
-                    else:
-                        ids_lines.append(f"  {ids}")
-                ids_display = "\n".join(ids_lines)
+            ids_display = self._format_ids_variant(self._selected_ids_variant())
 
             focus_char = self.current_char
             strokes = self.core.get_stroke_count(focus_char)
@@ -2990,30 +3034,14 @@ class HanziComponentSearchTool:
 
         if data:
             char_data = data[char]
-            # 使用 ids_1 和 ids_2 而非 ids
-            ids_1 = char_data.get("ids_1", "")
-            ids_2 = char_data.get("ids_2", "")
-
-            # 收集所有可用的 IDS
-            self.available_ids = [ids for ids in [ids_1, ids_2] if ids]
+            # Preserve every Bai IDS form (including source-specific variants).
+            self.available_ids = self.core.get_ids_variant_records(char)
 
             # 重置索引
             self.current_ids_index = 0
 
-            # 顯示所有可用的 IDS 拆法
-            if self.available_ids:
-                if len(self.available_ids) == 1:
-                    ids_display = self.available_ids[0]
-                else:
-                    # 多個拆法時，列出所有並標示當前選中的
-                    ids_lines = []
-                    for i, ids in enumerate(self.available_ids):
-                        if i == self.current_ids_index:
-                            ids_lines.append(f"▶ {ids}")
-                        else:
-                            ids_lines.append(f"  {ids}")
-                    ids_display = "\n".join(ids_lines)
-            else:
+            ids_display = self._format_ids_variant(self._selected_ids_variant())
+            if not ids_display:
                 # 無 IDS 資料時顯示本字
                 ids_display = char_data["char"]
 

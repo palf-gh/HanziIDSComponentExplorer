@@ -18,6 +18,7 @@ import pickle
 from pathlib import Path
 
 YIBAI_REPO = "https://github.com/yi-bai/ids"
+CACHE_VERSION = 2
 
 _VARIANT_TAG_RE = re.compile(r"\{[^{}]*\}")
 _BRACKET_RE = re.compile(r"\[[^\[\]]*\]")
@@ -42,7 +43,7 @@ def bundled_path(level=1):
 
 
 def compiled_cache_path(level=1):
-    return cache_dir() / ("yi-bai-ids-lv%d.pdata" % int(level))
+    return cache_dir() / ("yi-bai-ids-v%d-lv%d.pdata" % (CACHE_VERSION, int(level)))
 
 
 def _split_variants(field):
@@ -86,21 +87,48 @@ def clean_bai_ids(sequence):
     return s
 
 
-def _first_clean_variant(field):
+def _variant_indicators(sequence):
+    """Return the trailing Bai IDS variant indicators without IDS syntax tags.
+
+    A sequence such as ``⿰虫単(J)`` has the regional indicator ``J``.  The
+    IDS syntax itself can also contain parenthesised hash expressions, for
+    example ``#(T)(.)``.  Only parenthesis groups after the expression are
+    indicators, so a group directly preceded by ``#`` is left untouched.
+    """
+    indicators = []
+    remaining = (sequence or "").strip()
+    while remaining.endswith(")"):
+        match = re.search(r"\(([^()]*)\)$", remaining)
+        if not match or match.start() > 0 and remaining[match.start() - 1] == "#":
+            break
+        indicators.insert(0, match.group(1).strip())
+        remaining = remaining[:match.start()].rstrip()
+    return indicators
+
+
+def _parse_variants(field, group):
+    """Parse every semicolon-separated IDS variant in one source column."""
+    variants = []
     for item in _split_variants(field):
         cleaned = clean_bai_ids(item)
         if cleaned:
-            return cleaned
-    return ""
+            variants.append(
+                {
+                    "ids": cleaned,
+                    "indicators": _variant_indicators(item),
+                    "group": group,
+                }
+            )
+    return variants
 
 
 def parse_text(text):
     """
     Parse Yi Bai IDS text into HanziCore's pdata-compatible dictionary.
 
-    The first primary IDS is mapped to ids_1 and the first distinct alternative
-    IDS to ids_2. Full Bai variant preservation can be layered on later without
-    changing this public shape.
+    Every primary and alternative IDS is retained in ``ids_variants``.  The
+    legacy ``ids_1`` / ``ids_2`` fields remain populated for compatibility with
+    the existing CHISE-oriented code paths.
     """
     db = {}
     for raw_line in text.splitlines():
@@ -115,16 +143,34 @@ def parse_text(text):
         if not char:
             continue
 
-        primary = _first_clean_variant(cols[1] if len(cols) > 1 else "")
-        alternative = _first_clean_variant(cols[2] if len(cols) > 2 else "")
-        if alternative == primary:
-            alternative = ""
+        variants = _parse_variants(cols[1] if len(cols) > 1 else "", "primary")
+        variants.extend(_parse_variants(cols[2] if len(cols) > 2 else "", "alternative"))
+
+        # Several source variants can normalise to the same compact IDS. Keep
+        # one page for that IDS but retain every attached regional annotation.
+        unique_variants = []
+        variant_by_ids = {}
+        for variant in variants:
+            existing = variant_by_ids.get(variant["ids"])
+            if existing is None:
+                existing = dict(variant)
+                existing["indicators"] = list(variant.get("indicators", []))
+                variant_by_ids[variant["ids"]] = existing
+                unique_variants.append(existing)
+            else:
+                for indicator in variant.get("indicators", []):
+                    if indicator not in existing["indicators"]:
+                        existing["indicators"].append(indicator)
+
+        ids_1 = unique_variants[0]["ids"] if unique_variants else ""
+        ids_2 = unique_variants[1]["ids"] if len(unique_variants) > 1 else ""
 
         db[char] = {
             "unicode": ("%X" % ord(char[0])) if char else "",
             "char": char,
-            "ids_1": primary,
-            "ids_2": alternative,
+            "ids_1": ids_1,
+            "ids_2": ids_2,
+            "ids_variants": unique_variants,
             "strokes": None,
         }
     return db

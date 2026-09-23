@@ -43,6 +43,26 @@ def _make_core(records: dict) -> HanziCore:
     return core
 
 
+def test_indexes_every_regional_ids_variant():
+    core = HanziCore(
+        database={
+            "蝉": {
+                "unicode": "8749",
+                "char": "蝉",
+                "ids_variants": [
+                    {"ids": "⿰虫单", "indicators": ["."], "group": "primary"},
+                    {"ids": "⿰虫単", "indicators": ["J"], "group": "primary"},
+                ],
+            }
+        }
+    )
+
+    assert core.get_ids_variants("蝉") == ["⿰虫单", "⿰虫単"]
+    assert core.get_ids_variant_records("蝉")[1]["indicators"] == ["J"]
+    assert core.search("单") == ["蝉"]
+    assert core.search("単") == ["蝉"]
+
+
 @pytest.fixture
 def core_components():
     """多層部件交集測試核心。
