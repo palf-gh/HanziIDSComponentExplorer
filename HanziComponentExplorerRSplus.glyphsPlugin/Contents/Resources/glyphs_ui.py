@@ -76,6 +76,10 @@ STROKE_FILTER_VALUES = [0, 1, 2, 3, 5]
 STROKE_FILTER_OFF_TICK = 5
 STROKE_FILTER_TICK_COUNT = STROKE_FILTER_OFF_TICK + 1  # 6 個 tick 位置
 
+# IDS 資料源。フォント制作向けに最も字形差を保持する Yi Bai lv0 を既定値とする。
+IDS_SOURCE_OPTIONS = ("yibai_lv0", "yibai_lv1", "yibai_lv2", "chise")
+DEFAULT_IDS_SOURCE = "yibai_lv0"
+
 # 右側相關字區域排版設定
 RELATED_CHARS_KERN = 0.0  # 字距（字符間距，單位：點）- 預設值
 RELATED_CHARS_LINE_HEIGHT = 1.2  # 行高倍數（相對於字體大小）
@@ -159,6 +163,11 @@ class _FilterMenuHandlerBase(NSObject):
 
     def toggleDesignedOnly_(self, sender):
         self.tool.toggle_designed_only(None)
+
+    def selectIDSSource_(self, sender):
+        source = sender.representedObject()
+        if source:
+            self.tool.select_ids_source(str(source))
 
     def openSelectedTiles_(self, sender):
         self.tool.open_selected_related_tile_objects()
@@ -322,12 +331,16 @@ class HanziComponentSearchTool:
     _CACHE_MAX_SIZE = 500  # 最大快取數量
 
     def __init__(self, title=None):
-        # === 初始化核心引擎 ===
-        self.core = HanziCore(self._find_data_path())
+        # === 設定與 IDS 核心 ===
+        self.settings = GlyphsSettings()
+        self.ids_source = self.settings.get("idsSource", DEFAULT_IDS_SOURCE)
+        if self.ids_source not in IDS_SOURCE_OPTIONS:
+            self.ids_source = DEFAULT_IDS_SOURCE
+        self.active_ids_source = None
+        self.core = self._load_selected_core()
 
         # === 初始化 Glyphs 適配器 ===
         self.adapter = GlyphsAdapter()
-        self.settings = GlyphsSettings()
 
         # === 初始化基本屬性 ===
         self.currentCharset: Set[str] = set()
@@ -1491,9 +1504,76 @@ class HanziComponentSearchTool:
             self._refresh_summary_panel(hint=L("summary_open_new_tab_failed"))
 
     def _find_data_path(self) -> str:
-        """尋找資料庫路徑"""
+        """尋找既有 CHISE 資料庫路徑。"""
         script_dir = os.path.dirname(os.path.abspath(__file__))
         return os.path.join(script_dir, "data", "ids.pdata")
+
+    def _load_selected_core(self):
+        """保存済み設定に従って IDS 資料源を読み込む。"""
+        source = self.ids_source
+
+        if source == "chise":
+            self.active_ids_source = "chise"
+            return HanziCore(
+                self._find_data_path(),
+                source_name="CHISE IDS",
+            )
+
+        level_map = {
+            "yibai_lv0": 0,
+            "yibai_lv1": 1,
+            "yibai_lv2": 2,
+        }
+        level = level_map.get(source, 0)
+
+        try:
+            from yibai_ids import load as load_yibai_ids, source_label
+
+            database = load_yibai_ids(
+                level=level,
+                stroke_data_path=self._find_data_path(),
+            )
+            self.active_ids_source = source
+            return HanziCore(
+                database=database,
+                source_name=source_label(level=level),
+            )
+        except Exception as exc:
+            # 外部資料源不能阻止外掛啟動。Glyphs Macro Panel 可看到原因。
+            self.active_ids_source = "chise_fallback"
+            print(
+                "[Hanzi Component Explorer RS+] Yi Bai IDS lv%d unavailable; "
+                "falling back to bundled CHISE IDS: %s" % (level, exc)
+            )
+            return HanziCore(
+                self._find_data_path(),
+                source_name="CHISE IDS (bundled fallback)",
+            )
+
+    def select_ids_source(self, source):
+        """IDS 資料源を切り替え、現在の検索結果を再計算する。"""
+        if source not in IDS_SOURCE_OPTIONS:
+            return
+        if source == self.ids_source and self.active_ids_source != "chise_fallback":
+            return
+
+        self.ids_source = source
+        self.settings.set("idsSource", source)
+        self.core = self._load_selected_core()
+
+        # 現在の入力・選択字を新しい IDS で再評価する。
+        try:
+            self.perform_search()
+        except Exception:
+            import traceback
+            print(traceback.format_exc())
+
+        label_key = "ids_source_" + source
+        if self.active_ids_source == "chise_fallback":
+            hint = L("summary_ids_source_fallback").format(source=L(label_key))
+        else:
+            hint = L("summary_ids_source_changed").format(source=L(label_key))
+        self._refresh_summary_panel(hint=hint)
 
     # === UI utilities ===
 
@@ -2203,6 +2283,29 @@ class HanziComponentSearchTool:
         designed_only_item.setTarget_(self.filterMenuHandler)
         designed_only_item.setState_(NSOnState if self.show_designed_only else NSOffState)
         menu.addItem_(designed_only_item)
+
+        # IDS 資料源
+        ids_root_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            L("menu_ids_source"), None, ""
+        )
+        ids_submenu = NSMenu.alloc().initWithTitle_(L("menu_ids_source"))
+        ids_entries = (
+            ("yibai_lv0", "ids_source_yibai_lv0"),
+            ("yibai_lv1", "ids_source_yibai_lv1"),
+            ("yibai_lv2", "ids_source_yibai_lv2"),
+            ("chise", "ids_source_chise"),
+        )
+        for source, label_key in ids_entries:
+            item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                L(label_key), "selectIDSSource:", ""
+            )
+            item.setTarget_(self.filterMenuHandler)
+            item.setRepresentedObject_(source)
+            item.setState_(NSOnState if self.ids_source == source else NSOffState)
+            ids_submenu.addItem_(item)
+        ids_root_item.setSubmenu_(ids_submenu)
+        menu.addItem_(ids_root_item)
+
         menu.addItem_(NSMenuItem.separatorItem())
 
         # 顏色篩選項目

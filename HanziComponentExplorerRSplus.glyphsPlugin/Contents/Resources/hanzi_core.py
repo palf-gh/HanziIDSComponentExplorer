@@ -26,10 +26,11 @@ ERROR_UNKNOWN_CHAR = "未知字符"
 ERROR_SEARCH_FAILED = "搜尋失敗"
 
 # IDS 分隔字符 (Ideographic Description Characters)
-IDC_CHARS = "⿰⿱⿲⿳⿴⿵⿶⿷⿸⿹⿺⿻〾"
+# Unicode 15.1+ の追加 IDC（⿼⿽⿾⿿㇯）にも対応。
+IDC_CHARS = "⿰⿱⿲⿳⿴⿵⿶⿷⿸⿹⿺⿻⿼⿽⿾⿿㇯〾"
 
 # 每個 IDC 帶的 operand 個數（IDS 標準）：
-# 二元：⿰⿱⿴⿵⿶⿷⿸⿹⿺⿻；三元：⿲⿳；一元：〾（變體）
+# 二元：⿰⿱⿴〜⿽、㇯；三元：⿲⿳；一元：⿾⿿、〾（既有資料互換）
 IDC_ARITY = {
     "⿰": 2,
     "⿱": 2,
@@ -43,11 +44,16 @@ IDC_ARITY = {
     "⿹": 2,
     "⿺": 2,
     "⿻": 2,
+    "⿼": 2,
+    "⿽": 2,
+    "⿾": 1,
+    "⿿": 1,
+    "㇯": 2,
     "〾": 1,
 }
 
 # 位置分組標籤的展示順序（IDC 主序、位置升序、≡ 在最後、direct before nested）
-IDC_ORDER = "⿰⿱⿲⿳⿴⿵⿶⿷⿸⿹⿺⿻〾∅"
+IDC_ORDER = "⿰⿱⿲⿳⿴⿵⿶⿷⿸⿹⿺⿻⿼⿽⿾⿿㇯〾∅"
 MULTI_POSITION_MARKER = "≡"
 NESTED_POSITION_MARKER = "·"
 UNCLASSIFIED_LABEL = "∅"
@@ -115,16 +121,34 @@ def _normalize_cjk_variant(char: str) -> str:
 class HanziCore:
     """漢字部件分析核心引擎"""
 
-    def __init__(self, data_path: str):
+    def __init__(
+        self,
+        data_path: Optional[str] = None,
+        database: Optional[Dict[str, Dict[str, object]]] = None,
+        source_name: Optional[str] = None,
+    ):
         """
         初始化引擎並載入資料庫
 
         參數:
-        data_path (str): IDS 資料庫檔案路徑（.pdata 格式）
+        data_path (Optional[str]): IDS 資料庫檔案路徑（.pdata 格式）
+        database (Optional[Dict]): 已載入的 pdata 相容資料庫。
+            指定時は data_path より優先し、外部 IDS provider を利用できる。
+        source_name (Optional[str]): UI/診断用の資料源名称。
         """
-        self.data_path = self._resolve_path(data_path)
+        self.data_path = self._resolve_path(data_path) if data_path else None
+        self.source_name = source_name or ("CHISE IDS" if data_path else "External IDS")
         self._parsed_ids_cache: Dict[str, List[List[str]]] = {}
-        self.db = self._load_database()
+
+        if database is not None:
+            if not isinstance(database, dict):
+                raise ValueError("database must be a dict")
+            self.db = self._convert_format(database)
+        elif self.data_path is not None:
+            self.db = self._load_database()
+        else:
+            raise ValueError("Either data_path or database must be provided")
+
         self._build_indexes()
 
     def _resolve_path(self, path: str) -> Path:
@@ -388,7 +412,7 @@ class HanziCore:
         """
 
         def split_special_chars(s):
-            return re.findall(r"&[^;]+;|[⿰⿱⿲⿳⿴⿵⿶⿷⿸⿹⿺⿻〾]|\S", s)
+            return re.findall(r"&[^;]+;|[⿰⿱⿲⿳⿴⿵⿶⿷⿸⿹⿺⿻⿼⿽⿾⿿㇯〾]|\S", s)
 
         if isinstance(ids, str):
             if ids in self._parsed_ids_cache:
