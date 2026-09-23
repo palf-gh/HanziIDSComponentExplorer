@@ -41,6 +41,18 @@ def test_parse_text_uses_first_nonempty_clean_variant():
     assert data["丶"]["ids_1"] == ""
 
 
+def test_parse_text_preserves_regional_variants_and_indicators():
+    data = yibai_ids.parse_text("蝉\t⿰虫单(.);⿰虫単(J)\n")
+    assert data["蝉"]["ids_variants"] == [
+        {"ids": "⿰虫单", "indicators": ["."], "group": "primary"},
+        {"ids": "⿰虫単", "indicators": ["J"], "group": "primary"},
+    ]
+
+
+def test_variant_indicators_ignore_hash_expression_syntax():
+    assert yibai_ids._variant_indicators("#(H)(.)") == ["."]
+
+
 def test_bundled_levels_exist():
     for level in (0, 1, 2):
         path = yibai_ids.bundled_path(level)

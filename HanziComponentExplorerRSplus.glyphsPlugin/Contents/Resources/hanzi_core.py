@@ -204,8 +204,8 @@ class HanziCore:
         """
         將新格式資料庫轉換為內部使用格式
 
-        正規化 IDS 字串中的 CJK 變體，並清除正規化後重複的 ids_2。
-        保留 strokes 欄位（若存在），舊版資料庫無此欄位則為 None。
+        正規化 IDS 字串中的 CJK 變體，並保留完整的 IDS 變體清單。
+        舊版資料的 ids_1 / ids_2 會自動轉換為相容的變體清單。
 
         參數:
         pdata: 新格式資料庫
@@ -217,15 +217,52 @@ class HanziCore:
         converted_data = {}
 
         for char, data in pdata.items():
-            ids_1 = self._normalize_ids_string(data.get("ids_1", ""))
-            ids_2 = self._normalize_ids_string(data.get("ids_2", ""))
-            if ids_2 and ids_2 == ids_1:
-                ids_2 = ""
+            raw_variants = data.get("ids_variants")
+            if not isinstance(raw_variants, list):
+                raw_variants = [
+                    {"ids": data.get("ids_1", ""), "group": "primary"},
+                    {"ids": data.get("ids_2", ""), "group": "alternative"},
+                ]
+
+            variants = []
+            variants_by_ids = {}
+            for raw_variant in raw_variants:
+                if isinstance(raw_variant, dict):
+                    raw_ids = raw_variant.get("ids", "")
+                    raw_indicators = raw_variant.get("indicators", [])
+                    group = raw_variant.get("group", "primary")
+                else:
+                    raw_ids = raw_variant
+                    raw_indicators = []
+                    group = "primary"
+                ids = self._normalize_ids_string(raw_ids)
+                if not ids:
+                    continue
+                if not isinstance(raw_indicators, list):
+                    raw_indicators = [raw_indicators]
+                indicators = [str(value) for value in raw_indicators if value]
+                existing = variants_by_ids.get(ids)
+                if existing is None:
+                    existing = {
+                        "ids": ids,
+                        "indicators": indicators,
+                        "group": str(group),
+                    }
+                    variants_by_ids[ids] = existing
+                    variants.append(existing)
+                else:
+                    for indicator in indicators:
+                        if indicator not in existing["indicators"]:
+                            existing["indicators"].append(indicator)
+
+            ids_1 = variants[0]["ids"] if variants else ""
+            ids_2 = variants[1]["ids"] if len(variants) > 1 else ""
             converted_data[char] = {
                 "unicode": data.get("unicode", ""),
                 "char": char,
                 "ids_1": ids_1,
                 "ids_2": ids_2,
+                "ids_variants": variants,
                 "strokes": data.get("strokes"),  # 舊版資料庫無此欄位 → None
             }
 
@@ -237,6 +274,27 @@ class HanziCore:
         if not ids:
             return ids or ""
         return "".join(_normalize_cjk_variant(ch) for ch in ids)
+
+    @staticmethod
+    def _ids_variant_records(data) -> List[Dict[str, object]]:
+        """Return every retained IDS variant, including regional annotations."""
+        if not data:
+            return []
+        variants = data.get("ids_variants")
+        if isinstance(variants, list):
+            return [variant for variant in variants if isinstance(variant, dict) and variant.get("ids")]
+        return [
+            {"ids": ids, "indicators": [], "group": group}
+            for ids, group in (
+                (data.get("ids_1", ""), "primary"),
+                (data.get("ids_2", ""), "alternative"),
+            )
+            if ids
+        ]
+
+    @classmethod
+    def _ids_strings(cls, data) -> List[str]:
+        return [variant["ids"] for variant in cls._ids_variant_records(data)]
 
     def _build_indexes(self):
         """
@@ -256,10 +314,7 @@ class HanziCore:
                 self._unicode_index[unicode_hex.upper()] = char
 
             # 部件反向索引（含 NFKC 正規化）
-            for ids_key in ("ids_1", "ids_2"):
-                ids_str = data.get(ids_key)
-                if not ids_str:
-                    continue
+            for ids_str in self._ids_strings(data):
                 components = self.parse_ids(ids_str)[0]
                 for comp in components:
                     if comp in IDC_CHARS or comp.startswith("&"):
@@ -462,13 +517,9 @@ class HanziCore:
                 found = True
 
             # 3. 檢查 IDS 結構中的部件（檢查所有變體）
-            elif data.get("ids_1") or data.get("ids_2"):
+            elif self._ids_variant_records(data):
                 try:
-                    ids_variants = []
-                    if data.get("ids_1"):
-                        ids_variants.append(data["ids_1"])
-                    if data.get("ids_2"):
-                        ids_variants.append(data["ids_2"])
+                    ids_variants = self._ids_strings(data)
 
                     for ids in ids_variants:
                         parsed_ids_list = self.parse_ids(ids)
@@ -697,17 +748,14 @@ class HanziCore:
         self, char: str, variant_index: int = 0
     ) -> List[str]:
         data = self.db.get(char)
-        if not data:
+        variants = self._ids_strings(data)
+        if not variants:
             return []
-        ids_1 = data.get("ids_1") or ""
-        ids_2 = data.get("ids_2") or ""
-        if ids_2 == ids_1:
-            ids_2 = ""
         if variant_index == -1:
-            return [ids for ids in (ids_1, ids_2) if ids]
-        if variant_index == 1:
-            return [ids_2 or ids_1] if (ids_2 or ids_1) else []
-        return [ids_1 or ids_2] if (ids_1 or ids_2) else []
+            return variants
+        if 0 <= variant_index < len(variants):
+            return [variants[variant_index]]
+        return [variants[0]]
 
     def classify_by_position(
         self, query: str, target_char: str, variant_index: int = 0
@@ -794,7 +842,7 @@ class HanziCore:
         參數:
         char (str): 要搜尋同字根的字符
         charset (Optional[Set[str]]): 可選的字符集篩選
-        variant_index (int): 使用第幾種拆法（0=ids_1, 1=ids_2, -1=合併所有）
+        variant_index (int): 使用第幾種拆法（0-based, -1=合併所有）
 
         回傳:
         Dict[str, Dict[str, List[str]]]: 同字根資料
@@ -804,26 +852,24 @@ class HanziCore:
         if not target_data:
             return {}
 
+        target_variants = self._ids_strings(target_data)
+        if not target_variants:
+            return {}
+
         # 如果是 variant_index == -1，合併所有拆法的結果
         if variant_index == -1:
-            result_1 = self._find_sister_by_ids(
-                char, target_data.get("ids_1", ""), charset
-            )
-            result_2 = self._find_sister_by_ids(
-                char, target_data.get("ids_2", ""), charset
-            )
-            return self._merge_sister_results(result_1, result_2)
+            merged = {}
+            for target_ids in target_variants:
+                merged = self._merge_sister_results(
+                    merged, self._find_sister_by_ids(char, target_ids, charset)
+                )
+            return merged
 
-        # 根據 variant_index 選擇 IDS
-        if variant_index == 0:
-            target_ids = target_data.get("ids_1") or target_data.get("ids_2", "")
-        elif variant_index == 1:
-            target_ids = target_data.get("ids_2") or target_data.get("ids_1", "")
-        else:
-            target_ids = target_data.get("ids_1") or target_data.get("ids_2", "")
-
-        if not target_ids:
-            return {}
+        target_ids = (
+            target_variants[variant_index]
+            if 0 <= variant_index < len(target_variants)
+            else target_variants[0]
+        )
 
         return self._find_sister_by_ids(char, target_ids, charset)
 
@@ -856,11 +902,7 @@ class HanziCore:
                 continue
 
             # 收集所有 IDS 變體
-            ids_variants = []
-            if data.get("ids_1"):
-                ids_variants.append(data["ids_1"])
-            if data.get("ids_2"):
-                ids_variants.append(data["ids_2"])
+            ids_variants = self._ids_strings(data)
 
             if not ids_variants:
                 continue
@@ -1061,17 +1103,14 @@ class HanziCore:
     def _selected_ids_list_for_tree(self, char: str, variant_index: int) -> List[str]:
         """Return IDS variants selected by UI variant_index with fallback rules."""
         data = self.db.get(char)
-        if not data:
+        variants = self._ids_strings(data)
+        if not variants:
             return []
-        ids_1 = data.get("ids_1") or ""
-        ids_2 = data.get("ids_2") or ""
-        if ids_2 == ids_1:
-            ids_2 = ""
         if variant_index == -1:
-            return [ids for ids in (ids_1, ids_2) if ids]
-        if variant_index == 1:
-            return [ids_2 or ids_1] if (ids_2 or ids_1) else []
-        return [ids_1 or ids_2] if (ids_1 or ids_2) else []
+            return variants
+        if 0 <= variant_index < len(variants):
+            return [variants[variant_index]]
+        return [variants[0]]
 
     def _ids_is_expandable(self, ids: str, char: str = "") -> bool:
         """True when IDS actually describes a structure rather than a standalone char."""
@@ -1187,17 +1226,11 @@ class HanziCore:
         List[str]: IDS 拆法列表，例如 ['⿰木木', '⿱某某']
                    如果字符不存在或沒有拆法，返回空列表
         """
-        data = self.db.get(char)
-        if not data:
-            return []
+        return self._ids_strings(self.db.get(char))
 
-        variants = []
-        if data.get("ids_1"):
-            variants.append(data["ids_1"])
-        if data.get("ids_2"):
-            variants.append(data["ids_2"])
-
-        return variants
+    def get_ids_variant_records(self, char: str) -> List[Dict[str, object]]:
+        """Return IDS strings together with Bai regional variant indicators."""
+        return self._ids_variant_records(self.db.get(char))
 
     # === 工具函數 ===
 
