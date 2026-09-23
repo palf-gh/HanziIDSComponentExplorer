@@ -19,7 +19,7 @@
 ```text
 yintzuyuan/HanziIDSComponentExplorer
   → 0oma/HanziIDSComponentExplorer（漢字部件查詢 RS+）
-  → palf-gh/HanziIDSComponentExplorer（目前儲存庫）
+  → Palf（目前儲存庫）
 ```
 
 RS+ 保留原專案的 IDS 搜尋核心，並為 Glyphs 的實際製作流程加入日文介面、字磚、製作狀態、Yi Bai 字形資料與區域字形標記。上游功能會在確認能與 RS+ 的 UI、資料來源及授權共存後手動移植；不直接合併上游分支，以避免覆蓋 RS+ 的變更。
@@ -76,7 +76,7 @@ RS+ 保留原專案的 IDS 搜尋核心，並為 Glyphs 的實際製作流程加
 
 程式碼以 [Apache License 2.0](LICENSE) 授權。
 
-本儲存庫是 **yintzuyuan → 0oma → palf-gh** 的第二層 fork；原始著作權歸 **殷慈遠 TzuYuan Yin** 所有，RS+ 修改部分 © 2026 [Ooma Kobayashi](https://ooma.jp)，此儲存庫的後續修改由 palf-gh 維護。依 Apache License 2.0 第 4 條，已保留原始權利與出處標示，並在 [NOTICE](NOTICE) 中標明本 fork 可能包含修改。
+本儲存庫是 **yintzuyuan → 0oma → Palf** 的第二層 fork；原始著作權歸 **殷慈遠 TzuYuan Yin** 所有，RS+ 修改部分 © 2026 [Ooma Kobayashi](https://ooma.jp)，此儲存庫的後續修改由 Palf 維護。依 Apache License 2.0 第 4 條，已保留原始權利與出處標示，並在 [NOTICE](NOTICE) 中標明本 fork 可能包含修改。
 
 本外掛內含的 `ids.pdata` 為 [CHISE IDS](https://www.chise.org/ids/) 衍生資料，受 [GPL-2.0-or-later](LICENSES/GPL-2.0-or-later.txt) 約束。CNS11643 資料依[政府資料開放授權條款](https://data.gov.tw/license)使用。
 
@@ -109,7 +109,7 @@ This is a **fork of a fork**:
 ```text
 yintzuyuan/HanziIDSComponentExplorer
   → 0oma/HanziIDSComponentExplorer (Hanzi Component Explorer RS+)
-  → palf-gh/HanziIDSComponentExplorer (this repository)
+  → Palf (this repository)
 ```
 
 RS+ retains the original IDS-search core and adds a Japanese interface, character tiles, production-status tools, Yi Bai shape data, and regional-form annotations for Glyphs production work. Upstream features are ported manually after they are checked against the RS+ UI, data sources, and licenses. The upstream branch is not merged directly because that could overwrite RS+-specific work.
@@ -166,7 +166,7 @@ If the plugin is available in Glyphs Plugin Manager, install it from *Window > P
 
 Source code is licensed under the [Apache License 2.0](LICENSE).
 
-This repository is a second-level fork: **yintzuyuan → 0oma → palf-gh**. Original copyright remains with **TzuYuan Yin**; RS+ modifications are © 2026 [Ooma Kobayashi](https://ooma.jp), and subsequent changes are maintained by palf-gh. In accordance with Apache License 2.0 section 4, original rights and attribution notices are retained, and [NOTICE](NOTICE) states that this fork may contain modified files.
+This repository is a second-level fork: **yintzuyuan → 0oma → Palf**. Original copyright remains with **TzuYuan Yin**; RS+ modifications are © 2026 [Ooma Kobayashi](https://ooma.jp), and subsequent changes are maintained by Palf. In accordance with Apache License 2.0 section 4, original rights and attribution notices are retained, and [NOTICE](NOTICE) states that this fork may contain modified files.
 
 The bundled `ids.pdata` is derived from the [CHISE IDS](https://www.chise.org/ids/) database and is subject to [GPL-2.0-or-later](LICENSES/GPL-2.0-or-later.txt). CNS11643 data is used under the [Open Government Data License, Taiwan](https://data.gov.tw/license).
 
@@ -199,7 +199,7 @@ Thanks to the [CHISE Project](https://www.chise.org/), [CNS11643](https://www.cn
 ```text
 yintzuyuan/HanziIDSComponentExplorer
   → 0oma/HanziIDSComponentExplorer（漢字部品検索 RS+）
-  → palf-gh/HanziIDSComponentExplorer（このリポジトリ）
+  → Palf（このリポジトリ）
 ```
 
 RS+ は元の IDS 検索コアを維持しつつ、日本語UI、字形タイル、制作状況、Yi Bai の字形データ、地域字形の注記を Glyphs での制作向けに加えています。上流の機能は RS+ のUI・データソース・ライセンスと両立することを確認してから手動で移植します。RS+固有の変更を上書きしないため、上流ブランチをそのままマージする方針は取りません。
@@ -256,7 +256,7 @@ Glyphs のプラグインマネージャーに登録されている場合は、*
 
 ソースコードは [Apache License 2.0](LICENSE) でライセンスされています。
 
-本リポジトリは **yintzuyuan → 0oma → palf-gh** と続く第2層のフォークです。原著作権は **TzuYuan Yin / 殷慈遠** に帰属し、RS+の変更部分は © 2026 [Ooma Kobayashi](https://ooma.jp)、以降の変更は palf-gh が保守します。Apache License 2.0 第 4 条に従い、原著作権表示・出所表示を保持し、[NOTICE](NOTICE) に本 fork が変更済みファイルを含み得ることを明記しています。
+本リポジトリは **yintzuyuan → 0oma → Palf** と続く第2層のフォークです。原著作権は **TzuYuan Yin / 殷慈遠** に帰属し、RS+の変更部分は © 2026 [Ooma Kobayashi](https://ooma.jp)、以降の変更は Palf が保守します。Apache License 2.0 第 4 条に従い、原著作権表示・出所表示を保持し、[NOTICE](NOTICE) に本 fork が変更済みファイルを含み得ることを明記しています。
 
 同梱の `ids.pdata` は [CHISE IDS](https://www.chise.org/ids/) 由来のデータで、[GPL-2.0-or-later](LICENSES/GPL-2.0-or-later.txt) の対象です。CNS11643 データは [台湾政府資料開放授權條款](https://data.gov.tw/license) に基づいて使用しています。
 
@@ -266,7 +266,7 @@ Glyphs のプラグインマネージャーに登録されている場合は、*
 
 原作者：**TzuYuan Yin / 殷慈遠** — [erikyin.net](https://erikyin.net)
 
-本リポジトリには 2026 年の [Ooma Kobayashi](https://ooma.jp) によるRS+の変更と、palf-gh による継続的な保守・上流移植が含まれます。
+本リポジトリには 2026 年の [Ooma Kobayashi](https://ooma.jp) によるRS+の変更と、Palf による継続的な保守・上流移植が含まれます。
 
 [CHISE Project](https://www.chise.org/)、[全字庫 CNS11643](https://www.cns11643.gov.tw/)、[3type/EOD](https://github.com/3type/EOD) に感謝します。
 
