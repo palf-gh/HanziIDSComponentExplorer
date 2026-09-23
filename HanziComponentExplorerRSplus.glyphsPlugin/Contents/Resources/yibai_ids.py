@@ -2,9 +2,9 @@
 """
 Yi Bai IDS provider for Hanzi Component Explorer RS+.
 
-Downloads yi-bai/ids (MIT) on demand, stores the raw source in the user's
-cache directory, and converts Bai-style IDS notation into the compact form
-used by HanziCore.
+Bundles yi-bai/ids (MIT) with the plugin and converts Bai-style IDS notation
+into the compact form used by HanziCore. Converted data is cached locally for
+faster subsequent launches; normal use requires no network access.
 
 Source: https://github.com/yi-bai/ids
 """
@@ -13,7 +13,6 @@ from __future__ import division, print_function, unicode_literals
 
 import os
 import re
-import time
 import gzip
 import pickle
 from pathlib import Path
