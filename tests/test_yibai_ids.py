@@ -39,3 +39,10 @@ def test_parse_text_maps_primary_and_alternative_ids():
 def test_parse_text_uses_first_nonempty_clean_variant():
     data = yibai_ids.parse_text("丶\t#(D)(.);{丶}#(S)(s)\n")
     assert data["丶"]["ids_1"] == ""
+
+
+def test_bundled_levels_exist():
+    for level in (0, 1, 2):
+        path = yibai_ids.bundled_path(level)
+        assert path.exists()
+        assert path.name == "ids_lv%d.txt" % level
