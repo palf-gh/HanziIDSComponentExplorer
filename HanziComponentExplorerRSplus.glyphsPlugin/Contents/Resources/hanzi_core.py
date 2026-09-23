@@ -105,6 +105,254 @@ def resolve_display_char(
         return char
     return sticky or current
 
+def resolve_search_action(
+    input_text: Optional[str],
+    font_open: bool,
+    has_selected_char: bool,
+    is_complete: bool,
+) -> str:
+    """決定搜尋框 callback 該執行的動作（純函式，UI 只負責 dispatch）。
+
+    統一兩個 UI bug 的決策：#21 無字型時的搜尋閘門、#22 清空搜尋框的回退行為。
+
+    回傳動作字串：
+    - "auto"   清空輸入且當前有選中字 → 回到自動模式顯示該字（#22）
+    - "clear"  清空輸入且無選中字 → 三欄清成空白（#22）
+    - "noop"   非空但輸入未完整 → 維持現狀等待（既有行為）
+    - "gate"   非空且完整、但未開字型 → 閘門擋下（#21：避免回退對整個 IDS
+               資料庫查詢而崩潰），改顯示提示
+    - "search" 非空、完整、已開字型 → 執行搜尋
+    """
+    if not (input_text or "").strip():
+        return "auto" if has_selected_char else "clear"
+    if not is_complete:
+        return "noop"
+    return "search" if font_open else "gate"
+
+
+def flow_layout(
+    start_x: float, widths: List[float], gap: float
+) -> Tuple[List[Tuple[float, float]], float]:
+    """將一串元件從 start_x 起由左到右依序排列（純函式，UI 黏合靠實機量測）。
+
+    用於底部控制列：checkbox 依語言量測（sizeToFit）後流式擺放、滑桿接續其後，
+    取代「固定座標假設某語言字串長度」而導致英文 label 截斷的舊作法（#23）。
+
+    回傳 (positions, next_x)：
+    - positions 與 widths 對應，每個 (x, width)
+    - next_x 是最後一個元件之後（含一個尾隨 gap）的下一個起始 x，供滑桿左緣接續；
+      widths 為空時等於 start_x（不含尾隨 gap）。
+    """
+    positions: List[Tuple[float, float]] = []
+    x = start_x
+    for w in widths:
+        positions.append((x, w))
+        x += w + gap
+    return positions, x
+
+
+def field_display_char(text: Optional[str]) -> Optional[str]:
+    """決定搜尋框（NSSearchField）該以哪個字的字型渲染，無則回 None（用系統字型）。
+
+    NSSearchField 整欄只能用單一字型，故策略為：
+    1) 框內含造字（PUA）→ 用第一個 PUA 字驅動（系統字型必缺這些字、且單一字型
+       只能擇一，造字最該優先顯示，避免被前導 ASCII／CJK 蓋過）；
+    2) 否則整段皆非 ASCII（CJK／亞美尼亞等同書寫系統）→ 用首字；
+    3) 含 ASCII 且無 PUA（如 U+XXXX 十六進位查詢）→ None（維持系統字型）。
+
+    註：單一字型欄位無法逐字混排；真正的逐字渲染在左／中／右面板。
+    """
+    if not text:
+        return None
+    stripped = text.strip()
+    if not stripped:
+        return None
+    for ch in stripped:
+        if is_pua(ord(ch)):
+            return ch
+    if all(ord(ch) > 127 for ch in stripped):
+        return stripped[0]
+    return None
+
+
+def glyph_font_runs(text: Optional[str]) -> List[Tuple[str, bool]]:
+    """將文字切成 (子字串, 需逐字解析字型) 的連續段。
+
+    連續 ASCII（<128）併為一段、回 False（用基準系統字型即可）；
+    每個非 ASCII 字各自成段、回 True（需 get_font_for_char 逐字解析，
+    因 CJK／亞美尼亞／PUA 造字／樹狀符號可能各需不同字型，不可併用單一字型）。
+
+    用於中欄結果列表的自訂儲存格逐字繪製；保證各段串接後等於原字串。
+    """
+    runs: List[Tuple[str, bool]] = []
+    ascii_buf: List[str] = []
+    for ch in text or "":
+        if ord(ch) > 127:
+            if ascii_buf:
+                runs.append(("".join(ascii_buf), False))
+                ascii_buf = []
+            runs.append((ch, True))
+        else:
+            ascii_buf.append(ch)
+    if ascii_buf:
+        runs.append(("".join(ascii_buf), False))
+    return runs
+
+
+def font_cache_key(
+    char: str, size: float, font_family: Optional[str]
+) -> Tuple[str, float, Optional[str]]:
+    """組 get_font_for_char 的字型快取鍵，把當前文件家族名納入識別。
+
+    last_resort（PUA 造字）的字型解析依「當前開啟 Glyphs 文件的家族名」而定，
+    故同一 (char, size) 在不同文件可能應對到不同字型。鍵不含家族身分時會跨文件
+    誤命中、回傳前一文件的陳舊字型（#19 回歸）。font_family 空字串正規化為 None，
+    使「無開啟文件」狀態有穩定且一致的鍵。
+    """
+    return (char, size, font_family or None)
+
+
+def utf16_len(text: str) -> int:
+    """字串的 UTF-16 碼元長度（補充平面字計 2，BMP 計 1）。
+
+    CoreText 的 CTFontCreateForString range 以 UTF-16 計量，Python len() 以碼位計量；
+    補充平面字（CJK Ext-B、補充平面 PUA）若用 len() 只涵蓋前導代理，故需此換算。
+    """
+    return sum(2 if ord(ch) > 0xFFFF else 1 for ch in text or "")
+
+
+def choose_glyph_font_source(
+    folder_covers: bool, family_covers: bool, covering_found: bool
+) -> Optional[str]:
+    """PUA 缺字字型解析的優先序：回 'folder' / 'family' / 'covering' / None。
+
+    1) 參考字型資料夾內有字型涵蓋 → 'folder'（使用者明確放入的覆蓋意圖，最優先）；
+    2) 當前文件同名安裝字型確實涵蓋 → 'family'（編輯中優先）；
+    3) 否則有其他已安裝字型涵蓋 → 'covering'；
+    4) 都沒有 → None（退系統字型、由負向快取記住待重試）。
+
+    末步必為 None，不可退回「已確認不涵蓋」的同名字型——否則上層會把它當正向
+    結果快取（sticky 豆腐、forget_missing 清不掉）。見 [[FontCache]] 負向快取設計。
+    """
+    if folder_covers:
+        return "folder"
+    if family_covers:
+        return "family"
+    if covering_found:
+        return "covering"
+    return None
+
+
+# font_and_source_for_char（UI 層）來源標記的 canonical 字彙：前三項由
+# choose_glyph_font_source 決定，'cascade'/'system' 由 UI 層 fallback 賦予。
+# 新增 tier 必須同步 localization 的 font_source_* 鍵
+#（tests/test_font_source_strings.py 鎖定對應）。
+FONT_SOURCES = ("folder", "family", "covering", "cascade", "system")
+
+
+def is_pua(code_point: int) -> bool:
+    """碼位是否屬於私有使用區（BMP E000–F8FF、Plane 15/16，不含 noncharacter 尾端）。
+
+    PUA 的字型涵蓋各自為政、系統 cascade 的挑選本質上任意（#26：DIN 搶走造字顯示），
+    get_font_for_char 以此分流：PUA 跳過 CTFontCreateForString，直接走明確優先序解析。
+    """
+    return (
+        0xE000 <= code_point <= 0xF8FF
+        or 0xF0000 <= code_point <= 0xFFFFD
+        or 0x100000 <= code_point <= 0x10FFFD
+    )
+
+
+FONT_FILE_EXTENSIONS = (".otf", ".ttf", ".ttc", ".otc")
+
+
+def is_font_file_name(name: str) -> bool:
+    """檔名是否為應納入參考字型資料夾的字型檔（忽略隱藏檔、副檔名不分大小寫）。
+
+    供 fonts_folder_snapshot 與 UI 層的 scandir 迴圈共用——後者在 stat 前
+    先以此過濾，略過 .DS_Store 等非字型檔的 syscall。
+    """
+    return not name.startswith(".") and name.lower().endswith(FONT_FILE_EXTENSIONS)
+
+
+def is_private_font_name(name: Optional[str]) -> bool:
+    """字型家族名是否為系統私有名（以 '.' 開頭，如 .AppleSystemUIFont、.SF NS）。
+
+    這類名字是 Apple 內部字型、只有系統 cascade 找得到、不應洩漏給使用者。
+    預覽 tooltip 在 cascade 命中隱藏系統字型時以此改用通用名（#26）。
+    """
+    return bool(name) and name.startswith(".")
+
+
+def fonts_folder_snapshot(entries) -> Tuple:
+    """參考字型資料夾內容快照：(檔名, meta) 序列 → 排序後 tuple。
+
+    熱更新判定依據：前後快照不相等即資料夾有變動（新增/移除/重新匯出），
+    上層據此清字型快取重新解析。meta 為可排序、可比較的檔案識別——UI 層傳
+    (st_mtime_ns, st_size)，兩維並用可偵測 mtime 保留式覆蓋（cp -p、同步工具）。
+    只納入字型檔、忽略隱藏檔；排序使結果與 os.scandir 的不定順序無關。
+    """
+    return tuple(
+        sorted(
+            (name, meta) for name, meta in entries if is_font_file_name(name)
+        )
+    )
+
+
+class FontCache:
+    """字型解析快取：正向（鍵→不透明 value，UI 層目前存 (font, source) tuple）
+    與負向（鍵→已知無涵蓋字型）。
+
+    負向快取是效能關鍵：某 PUA 碼位無任何已安裝字型涵蓋時，若不記住，中欄 cell
+    每次重繪都會重跑全字型暴力掃描造成捲動卡頓。負向項視為暫時性（使用者可能稍後
+    安裝字型），故 forget_missing() 於新搜尋時清掉以重試；正向項（家族已納入鍵、
+    永久有效）保留不動。容量達上限時驅逐前半，負向項一併計入避免無上限成長。
+
+    純資料結構、不依賴 AppKit：字型值為不透明物件，由 UI 層注入。
+    """
+
+    _MISSING = object()  # sentinel：此鍵已知無涵蓋字型
+
+    def __init__(self, max_size: int = 500):
+        self._cache: Dict = {}
+        self._max_size = max_size
+
+    def lookup(self, key) -> Tuple[str, object]:
+        """回 (state, font)：('hit', font) / ('missing', None) / ('miss', None)。"""
+        if key not in self._cache:
+            return ("miss", None)
+        value = self._cache[key]
+        if value is self._MISSING:
+            return ("missing", None)
+        return ("hit", value)
+
+    def store(self, key, font) -> None:
+        self._evict_if_needed()
+        self._cache[key] = font
+
+    def store_missing(self, key) -> None:
+        self._evict_if_needed()
+        self._cache[key] = self._MISSING
+
+    def forget_missing(self) -> None:
+        """清掉所有負向項，讓無涵蓋字型的碼位於下次重新解析（可能已裝新字型）。"""
+        self._cache = {
+            k: v for k, v in self._cache.items() if v is not self._MISSING
+        }
+
+    def clear(self) -> None:
+        self._cache.clear()
+
+    def __len__(self) -> int:
+        return len(self._cache)
+
+    def _evict_if_needed(self) -> None:
+        if len(self._cache) >= self._max_size:
+            for k in list(self._cache.keys())[: self._max_size // 2]:
+                del self._cache[k]
+
+
+
 
 def _normalize_cjk_variant(char: str) -> str:
     """將 CJK 相關 Unicode 變體正規化為統一字，非 CJK 變體保持原樣"""
