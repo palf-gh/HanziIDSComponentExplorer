@@ -175,7 +175,22 @@ class GlyphsAdapter:
         glyph = GlyphsAdapter.find_glyph_for_char(font, char)
         if not glyph:
             return {"exists": False, "designed": False, "glyphName": None, "color": None}
-        layer = GlyphsAdapter.get_glyph_layer(font, char)
+        # Reuse the glyph resolved above. Looking it up again for every result
+        # tile is costly for broad component searches.
+        layer = None
+        if font:
+            try:
+                master_id = font.selectedFontMaster.id
+                if master_id in glyph.layers:
+                    layer = glyph.layers[master_id]
+            except Exception:
+                pass
+        if layer is None:
+            try:
+                if glyph.layers:
+                    layer = glyph.layers[0]
+            except Exception:
+                pass
         designed = GlyphsAdapter.is_layer_designed(layer)
         color = getattr(glyph, "color", None)
         glyph_name = getattr(glyph, "name", None)

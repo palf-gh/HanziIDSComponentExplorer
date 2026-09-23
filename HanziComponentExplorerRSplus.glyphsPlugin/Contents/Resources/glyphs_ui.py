@@ -1325,6 +1325,28 @@ class HanziComponentSearchTool:
         except Exception:
             return None
 
+    @staticmethod
+    def _tile_item_intersects_dirty_rect(item, dirty_rect):
+        """Return whether a tile item overlaps AppKit's requested repaint area.
+
+        A broad component search can yield thousands of result tiles. AppKit asks
+        a scroll view to repaint only the visible strip, so skipping items outside
+        that strip keeps scrolling proportional to the number of visible tiles.
+        """
+        try:
+            x, y, width, height = item.get("rect", (0, 0, 0, 0))
+            dirty_x, dirty_y = float(dirty_rect.origin.x), float(dirty_rect.origin.y)
+            dirty_width, dirty_height = float(dirty_rect.size.width), float(dirty_rect.size.height)
+            return (
+                x < dirty_x + dirty_width
+                and x + width > dirty_x
+                and y < dirty_y + dirty_height
+                and y + height > dirty_y
+            )
+        except Exception:
+            # A conservative fallback avoids accidentally omitting a tile.
+            return True
+
     def draw_related_tile_objects(self, view, dirty_rect):
         """Draw semantic tile objects. Called by RelatedTileObjectView.drawRect_."""
         if not self.related_tile_items:
@@ -1349,6 +1371,8 @@ class HanziComponentSearchTool:
         current_stroke = self._with_alpha(colors["accent"], 0.55)
 
         for idx, item in enumerate(self.related_tile_items):
+            if not self._tile_item_intersects_dirty_rect(item, dirty_rect):
+                continue
             kind = item.get("kind")
             x, y, w, h = item.get("rect", (0, 0, 0, 0))
             if kind == "label":
