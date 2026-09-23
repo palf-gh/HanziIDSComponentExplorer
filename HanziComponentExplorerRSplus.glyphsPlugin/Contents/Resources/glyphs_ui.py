@@ -30,6 +30,7 @@ from AppKit import (
     NSBaselineOffsetAttributeName,
     NSMutableParagraphStyle,
     NSColor,
+    NSCursor,
     NSOpenPanel,
     NSObject,
     NSImage,
@@ -934,7 +935,25 @@ class HanziComponentSearchTool:
             window = split_view.window()
             if window is not None:
                 window.invalidateCursorRectsForView_(split_view)
-            split_view.resetCursorRects()
+
+            # Vanilla's split view occasionally misses its initial cursor-rect
+            # registration.  Register the visible divider directly so its resize
+            # cursor appears before the first click or drag.
+            panes = list(split_view.subviews())
+            if panes:
+                left_frame = panes[0].frame()
+                bounds = split_view.bounds()
+                divider_width = max(8.0, float(split_view.dividerThickness()))
+                divider_x = left_frame.origin.x + left_frame.size.width
+                cursor_rect = NSMakeRect(
+                    divider_x - (divider_width / 2.0),
+                    0,
+                    divider_width,
+                    bounds.size.height,
+                )
+                split_view.addCursorRect_cursor_(
+                    cursor_rect, NSCursor.resizeLeftRightCursor()
+                )
         except Exception:
             pass
 
