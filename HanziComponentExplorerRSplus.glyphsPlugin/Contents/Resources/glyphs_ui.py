@@ -609,7 +609,10 @@ class HanziComponentSearchTool:
                 ),
             ],
             isVertical=True,
-            dividerStyle="thin",
+            # A standard splitter gives the divider a clear visual grip and a
+            # comfortably wide hit target, including macOS's resize cursor.
+            dividerStyle="splitter",
+            dividerThickness=8,
             autosaveName="com.HanziComponentExplorerRSplus.ResultsSplit",
         )
         self._install_related_tile_engine()
