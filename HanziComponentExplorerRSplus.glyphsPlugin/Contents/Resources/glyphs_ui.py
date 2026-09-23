@@ -18,6 +18,7 @@ from bisect import bisect_right
 from typing import Optional, Set, List
 
 import vanilla
+from vanilla.vanillaSplitView import VanillaSplitViewDelegate
 from AppKit import (
     NSFont,
     NSAttributedString,
@@ -30,7 +31,6 @@ from AppKit import (
     NSBaselineOffsetAttributeName,
     NSMutableParagraphStyle,
     NSColor,
-    NSCursor,
     NSOpenPanel,
     NSObject,
     NSImage,
@@ -341,6 +341,21 @@ ResizeObserverHandler = type(
 )
 
 
+# vanilla hides split-view dividers by default. This also hides the native
+# resize affordance, even when the panes themselves can be resized.
+visible_divider_delegate_class_name = f"VisibleDividerSplitViewDelegate_{int(time.time() * 1000)}"
+
+VisibleDividerSplitViewDelegate = type(
+    visible_divider_delegate_class_name,
+    (VanillaSplitViewDelegate,),
+    {
+        "splitView_shouldHideDividerAtIndex_": (
+            lambda self, splitView, dividerIndex: False
+        ),
+    },
+)
+
+
 class HanziComponentSearchTool:
     """Glyphs 外掛主視窗"""
 
@@ -557,7 +572,7 @@ class HanziComponentSearchTool:
             (0, 0, 35, 20), "◀", callback=self.prev_ids, sizeStyle="small"
         )
         self.treePane.idsSwitcher.indicator = vanilla.TextBox(
-            (40, 0, -80, 20), "1/2", alignment="center", sizeStyle="small"
+            (40, 0, -40, 20), "1/2", alignment="center", sizeStyle="small"
         )
         self.treePane.idsSwitcher.nextButton = vanilla.Button(
             (-35, 0, 35, 20), "▶", callback=self.next_ids, sizeStyle="small"
@@ -616,6 +631,10 @@ class HanziComponentSearchTool:
             dividerThickness=8,
             autosaveName="com.HanziComponentExplorerRSplus.ResultsSplit",
         )
+        # vanilla's default delegate hides every divider. Keeping this divider
+        # visible restores AppKit's built-in splitter grip and hover cursor.
+        self.w.resultsSplit._delegate = VisibleDividerSplitViewDelegate.alloc().init()
+        self.w.resultsSplit.getNSSplitView().setDelegate_(self.w.resultsSplit._delegate)
         self._install_related_tile_engine()
         self._sync_related_display_mode()
 
@@ -926,7 +945,7 @@ class HanziComponentSearchTool:
             pass
 
     def _refresh_results_split_interaction(self, initial_layout=False):
-        """Make the divider's resize cursor available on its first display."""
+        """Refresh the native splitter after its panes have been laid out."""
         try:
             split_view = self.w.resultsSplit.getNSSplitView()
             if initial_layout:
@@ -935,25 +954,6 @@ class HanziComponentSearchTool:
             window = split_view.window()
             if window is not None:
                 window.invalidateCursorRectsForView_(split_view)
-
-            # Vanilla's split view occasionally misses its initial cursor-rect
-            # registration.  Register the visible divider directly so its resize
-            # cursor appears before the first click or drag.
-            panes = list(split_view.subviews())
-            if panes:
-                left_frame = panes[0].frame()
-                bounds = split_view.bounds()
-                divider_width = max(8.0, float(split_view.dividerThickness()))
-                divider_x = left_frame.origin.x + left_frame.size.width
-                cursor_rect = NSMakeRect(
-                    divider_x - (divider_width / 2.0),
-                    0,
-                    divider_width,
-                    bounds.size.height,
-                )
-                split_view.addCursorRect_cursor_(
-                    cursor_rect, NSCursor.resizeLeftRightCursor()
-                )
         except Exception:
             pass
 
