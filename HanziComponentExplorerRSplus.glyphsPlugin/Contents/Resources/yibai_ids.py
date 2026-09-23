@@ -18,15 +18,7 @@ import gzip
 import pickle
 from pathlib import Path
 
-try:
-    from urllib.request import urlopen, Request
-except ImportError:  # pragma: no cover
-    from urllib2 import urlopen, Request
-
-
 YIBAI_REPO = "https://github.com/yi-bai/ids"
-YIBAI_RAW_URL = "https://raw.githubusercontent.com/yi-bai/ids/main/ids_lv{level}.txt"
-CACHE_MAX_AGE = 7 * 24 * 60 * 60
 
 _VARIANT_TAG_RE = re.compile(r"\{[^{}]*\}")
 _BRACKET_RE = re.compile(r"\[[^\[\]]*\]")
@@ -42,44 +34,16 @@ def cache_dir():
     return path
 
 
-def cache_path(level=1):
-    return cache_dir() / ("yi-bai-ids-lv%d.txt" % int(level))
+def bundled_path(level=1):
+    """Return the Yi Bai IDS text bundled inside the plugin."""
+    level = int(level)
+    if level not in (0, 1, 2):
+        raise ValueError("Yi Bai IDS level must be 0, 1, or 2")
+    return Path(__file__).parent / "data" / "yi-bai" / ("ids_lv%d.txt" % level)
 
 
 def compiled_cache_path(level=1):
     return cache_dir() / ("yi-bai-ids-lv%d.pdata" % int(level))
-
-
-def _is_cache_fresh(path, max_age=CACHE_MAX_AGE):
-    try:
-        return path.exists() and (time.time() - path.stat().st_mtime) < max_age
-    except OSError:
-        return False
-
-
-def download(level=1, force=False, timeout=20):
-    """Return local path to Yi Bai IDS source, downloading when necessary."""
-    level = int(level)
-    if level not in (0, 1, 2):
-        raise ValueError("Yi Bai IDS level must be 0, 1, or 2")
-
-    target = cache_path(level)
-    if not force and _is_cache_fresh(target):
-        return target
-
-    url = YIBAI_RAW_URL.format(level=level)
-    request = Request(url, headers={"User-Agent": "HanziComponentExplorerRSplus/1"})
-    with urlopen(request, timeout=timeout) as response:
-        payload = response.read()
-
-    if not payload:
-        raise RuntimeError("Yi Bai IDS download returned an empty response")
-
-    tmp = target.with_suffix(".tmp")
-    with open(str(tmp), "wb") as f:
-        f.write(payload)
-    os.replace(str(tmp), str(target))
-    return target
 
 
 def _split_variants(field):
@@ -205,15 +169,17 @@ def _compiled_cache_is_current(compiled, raw, stroke_data_path=None):
 
 def load(level=1, force_refresh=False, stroke_data_path=None):
     """
-    Load Yi Bai IDS as HanziCore-compatible data.
+    Load bundled Yi Bai IDS as HanziCore-compatible data.
 
-    The raw upstream text is cached for seven days. A converted gzip+pickle
-    cache is kept separately so subsequent plugin launches do not need to
-    parse roughly 100k IDS records again. Stroke counts are borrowed from the
-    bundled CHISE-derived database because Yi Bai IDS itself does not provide
-    stroke metadata.
+    Yi Bai lv0/lv1/lv2 text files are shipped with the plugin, so normal use
+    requires no network access. A converted gzip+pickle cache is kept in the
+    user's cache directory so subsequent launches do not need to parse the
+    full IDS text again. Stroke counts are borrowed from the bundled
+    CHISE-derived database because Yi Bai IDS itself does not provide them.
     """
-    raw = download(level=level, force=force_refresh)
+    raw = bundled_path(level)
+    if not raw.exists():
+        raise FileNotFoundError("Bundled Yi Bai IDS file not found: %s" % raw)
     compiled = compiled_cache_path(level)
 
     if not force_refresh and _compiled_cache_is_current(
@@ -245,4 +211,4 @@ def load(level=1, force_refresh=False, stroke_data_path=None):
 
 
 def source_label(level=1):
-    return "Yi Bai IDS lv%d (zi.tools lineage)" % int(level)
+    return "Yi Bai IDS lv%d (bundled)" % int(level)
