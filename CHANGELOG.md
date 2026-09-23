@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- Ported current upstream display infrastructure while preserving the RS+ UI: private-use characters now resolve through a cached font lookup, and the preview no longer applies a hard-coded baseline offset.
+- Added a reference-font folder entry to the filter menu. Fonts placed there take priority when displaying private-use characters.
+- Made the bottom controls measure their localized labels before laying out, so long English labels remain visible.
+- Prevented searches without an open Glyphs font from falling back to the full IDS database, and made clearing the search field return to the selected glyph or clear the panels.
+- Updated the bundled CHISE IDS data to the upstream version.
+
+### Verification
+
+- Test suite: 158 passed, 11 skipped.
+- Main plugin Python files syntax-checked with `py_compile`.
+
 ## [1.7.0+RSplus] - 2026-05-31
 
 ### Added
